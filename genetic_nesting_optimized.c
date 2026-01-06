@@ -507,7 +507,7 @@ bool piece_fits_in_board(Piece* piece, Point position, Board* board) {
     return true;
 }
 
-// Versão otimizada da busca de posição - AGRESSIVA EM CONCAVIDADES E PRIORIZANDO LADO ESQUERDO
+// Versão ULTRA-RIGOROSA de busca de posição - EXPLORAÇÃO EXAUSTIVA DE CONCAVIDADES
 Point find_best_position_fast(Piece* piece, Board* board) {
     Point best_pos = {-1, -1};
     double best_score = DBL_MAX;
@@ -531,8 +531,8 @@ Point find_best_position_fast(Piece* piece, Board* board) {
         return best_pos;
     }
 
-    // EXPLORAÇÃO MUITO MAIS AGRESSIVA DE CONCAVIDADES
-    // Testar múltiplas posições ao redor de cada peça existente
+    // FASE 1: EXPLORAÇÃO EXAUSTIVA DE CONCAVIDADES E POSIÇÕES DE CONTATO
+    // Testar MUITAS posições ao redor de cada peça existente
     for (int i = 0; i < board->piece_count; i++) {
         PlacedPiece* existing = &board->placed_pieces[i];
 
@@ -544,46 +544,60 @@ Point find_best_position_fast(Piece* piece, Board* board) {
         double ex_width = ex_max_x - ex_min_x;
         double ex_height = ex_max_y - ex_min_y;
 
-        // AUMENTADO: 6 posições básicas -> 16 posições de contato (otimizado)
-        Point contact_positions[16];
+        // AMPLIADO: 16 -> 32 posições de contato para exploração ultra-rigorosa
+        Point contact_positions[32];
         int pos_count = 0;
 
-        // Lado ESQUERDO (prioridade máxima) - 6 posições
-        contact_positions[pos_count++] = (Point){ex_min_x - piece->width - input_data.distance_between_pieces, ex_min_y};
-        contact_positions[pos_count++] = (Point){ex_min_x - piece->width - input_data.distance_between_pieces, ex_min_y + ex_height * 0.33};
-        contact_positions[pos_count++] = (Point){ex_min_x - piece->width - input_data.distance_between_pieces, ex_min_y + ex_height * 0.66};
-        contact_positions[pos_count++] = (Point){ex_min_x - piece->width - input_data.distance_between_pieces, ex_max_y - piece->height};
-        contact_positions[pos_count++] = (Point){ex_min_x - piece->width * 0.5 - input_data.distance_between_pieces, ex_min_y};
-        contact_positions[pos_count++] = (Point){ex_min_x - piece->width - input_data.distance_between_pieces, ex_min_y - piece->height - input_data.distance_between_pieces};
+        // Lado ESQUERDO (prioridade MÁXIMA) - 10 posições ao longo da altura
+        for (int h = 0; h < 10; h++) {
+            double y_offset = ex_min_y + (ex_height * h / 9.0);
+            contact_positions[pos_count++] = (Point){
+                ex_min_x - piece->width - input_data.distance_between_pieces,
+                y_offset
+            };
+        }
 
-        // BAIXO - 4 posições
-        contact_positions[pos_count++] = (Point){ex_min_x, ex_min_y - piece->height - input_data.distance_between_pieces};
-        contact_positions[pos_count++] = (Point){ex_min_x + ex_width * 0.33, ex_min_y - piece->height - input_data.distance_between_pieces};
-        contact_positions[pos_count++] = (Point){ex_min_x + ex_width * 0.66, ex_min_y - piece->height - input_data.distance_between_pieces};
-        contact_positions[pos_count++] = (Point){ex_max_x - piece->width, ex_min_y - piece->height - input_data.distance_between_pieces};
+        // BAIXO - 8 posições ao longo da largura
+        for (int w = 0; w < 8; w++) {
+            double x_offset = ex_min_x + (ex_width * w / 7.0);
+            contact_positions[pos_count++] = (Point){
+                x_offset,
+                ex_min_y - piece->height - input_data.distance_between_pieces
+            };
+        }
 
-        // Lado DIREITO - 3 posições
-        contact_positions[pos_count++] = (Point){ex_max_x + input_data.distance_between_pieces, ex_min_y};
-        contact_positions[pos_count++] = (Point){ex_max_x + input_data.distance_between_pieces, ex_min_y + ex_height * 0.5};
-        contact_positions[pos_count++] = (Point){ex_max_x + input_data.distance_between_pieces, ex_max_y - piece->height};
+        // Lado DIREITO - 7 posições (menor prioridade)
+        for (int h = 0; h < 7; h++) {
+            double y_offset = ex_min_y + (ex_height * h / 6.0);
+            contact_positions[pos_count++] = (Point){
+                ex_max_x + input_data.distance_between_pieces,
+                y_offset
+            };
+        }
 
-        // CIMA - 3 posições
-        contact_positions[pos_count++] = (Point){ex_min_x, ex_max_y + input_data.distance_between_pieces};
-        contact_positions[pos_count++] = (Point){ex_min_x + ex_width * 0.5, ex_max_y + input_data.distance_between_pieces};
-        contact_positions[pos_count++] = (Point){ex_max_x - piece->width, ex_max_y + input_data.distance_between_pieces};
+        // CIMA - 7 posições (menor prioridade)
+        for (int w = 0; w < 7; w++) {
+            double x_offset = ex_min_x + (ex_width * w / 6.0);
+            contact_positions[pos_count++] = (Point){
+                x_offset,
+                ex_max_y + input_data.distance_between_pieces
+            };
+        }
 
+        // Avaliar todas as posições de contato
         for (int j = 0; j < pos_count; j++) {
             Point pos = contact_positions[j];
 
             if (piece_fits_in_board(piece, pos, board)) {
-                // SCORE FORTEMENTE FAVORECENDO LADO ESQUERDO
-                // Peso X reduzido de 0.8 para 0.3 (prioriza mais esquerda)
-                // Peso Y reduzido de 1.0 para 0.7 (permite mais exploração vertical)
-                double score = pos.x * 0.3 + pos.y * 0.7;
+                // SCORE ULTRA-FAVORECENDO LADO ESQUERDO
+                // Peso X muito baixo = prioriza esquerda ao máximo
+                double score = pos.x * 0.15 + pos.y * 0.5;
 
-                // Bônus adicional para posições muito à esquerda
-                if (pos.x < board->width * 0.3) {
-                    score *= 0.5;  // 50% de desconto no score = maior prioridade
+                // Bônus gigante para posições muito à esquerda
+                if (pos.x < board->width * 0.25) {
+                    score *= 0.3;  // 70% de desconto = prioridade altíssima
+                } else if (pos.x < board->width * 0.5) {
+                    score *= 0.6;  // 40% de desconto
                 }
 
                 if (score < best_score) {
@@ -593,10 +607,9 @@ Point find_best_position_fast(Piece* piece, Board* board) {
             }
         }
 
-        // EXPLORAÇÃO EXTRA DE CONCAVIDADES: testar pontos intermediários entre peças (versão otimizada)
-        // Limitar a no máximo 3 outras peças para não explodir complexidade
-        int max_gaps = (board->piece_count - i - 1 < 3) ? board->piece_count - i - 1 : 3;
-        for (int j = i + 1; j <= i + max_gaps && j < board->piece_count; j++) {
+        // FASE 2: EXPLORAÇÃO SUPER-RIGOROSA DE CONCAVIDADES ENTRE PEÇAS
+        // Testar TODAS as combinações de peças para encontrar gaps
+        for (int j = i + 1; j < board->piece_count; j++) {
             PlacedPiece* other = &board->placed_pieces[j];
 
             double ot_min_x = other->rotated_piece.min_x + other->position.x;
@@ -604,25 +617,31 @@ Point find_best_position_fast(Piece* piece, Board* board) {
             double ot_max_x = other->rotated_piece.max_x + other->position.x;
             double ot_max_y = other->rotated_piece.max_y + other->position.y;
 
-            // Testar espaços entre duas peças (concavidades) - reduzido de 8 para 4 posições
-            Point gap_positions[4] = {
-                {ex_min_x, ot_min_y},
-                {ex_max_x, ot_min_y},
-                {ot_min_x, ex_min_y},
-                {(ex_min_x + ot_max_x) * 0.5, ex_min_y}
-            };
+            // Testar grid denso na região de gap entre as duas peças
+            Point gap_positions[20];
+            int gap_count = 0;
 
-            for (int k = 0; k < 4; k++) {
+            // Grid 4x5 na região entre as peças
+            for (int gx = 0; gx < 4 && gap_count < 20; gx++) {
+                for (int gy = 0; gy < 5 && gap_count < 20; gy++) {
+                    double test_x = ex_min_x + (ot_max_x - ex_min_x) * gx / 3.0;
+                    double test_y = ex_min_y + (ot_max_y - ex_min_y) * gy / 4.0;
+                    gap_positions[gap_count++] = (Point){test_x, test_y};
+                }
+            }
+
+            // Avaliar todas as posições de gap
+            for (int k = 0; k < gap_count; k++) {
                 Point pos = gap_positions[k];
 
                 if (piece_fits_in_board(piece, pos, board)) {
-                    double score = pos.x * 0.3 + pos.y * 0.7;
+                    double score = pos.x * 0.15 + pos.y * 0.5;
 
-                    // Bônus para preenchimento de gaps (concavidades)
-                    score *= 0.6;  // 40% de desconto = alta prioridade para concavidades
+                    // MEGA-BÔNUS para preenchimento de concavidades
+                    score *= 0.4;  // 60% de desconto = prioridade máxima
 
-                    if (pos.x < board->width * 0.3) {
-                        score *= 0.7;  // Bônus extra se estiver à esquerda
+                    if (pos.x < board->width * 0.25) {
+                        score *= 0.5;  // Bônus extra se estiver à esquerda
                     }
 
                     if (score < best_score) {
@@ -634,31 +653,64 @@ Point find_best_position_fast(Piece* piece, Board* board) {
         }
     }
 
-    // Se não encontrou posição de contato, busca em grid PRIORIZANDO ESQUERDA
+    // FASE 3: BUSCA EXAUSTIVA EM GRID FINO (só se não encontrou posição de contato)
     if (best_pos.x < 0) {
         double max_x = board->width - piece->width - input_data.distance_between_boards;
         double max_y = board->height - piece->height - input_data.distance_between_boards;
 
-        // Grid mais fino para melhor exploração
-        double step = max_double(piece->width, piece->height) * 0.2;  // Reduzido de 0.3 para 0.2
-        if (step < 5.0) step = 5.0;   // Reduzido de 10.0 para 5.0
-        if (step > 30.0) step = 30.0; // Reduzido de 40.0 para 30.0
+        // Grid MUITO mais fino para exploração ultra-rigorosa
+        double step = max_double(piece->width, piece->height) * 0.15;  // Reduzido de 0.2 para 0.15
+        if (step < 3.0) step = 3.0;   // Reduzido de 5.0 para 3.0
+        if (step > 20.0) step = 20.0; // Reduzido de 30.0 para 20.0
 
         int attempts = 0;
-        const int max_attempts = 2000;  // Aumentado de 1000 para 2000
+        const int max_attempts = 5000;  // Aumentado de 2000 para 5000
 
-        // BUSCA DA ESQUERDA PARA DIREITA, DE BAIXO PARA CIMA
+        // BUSCA RIGOROSA DA ESQUERDA PARA DIREITA, DE BAIXO PARA CIMA
         for (double x = min_x; x <= max_x && attempts < max_attempts; x += step) {
             for (double y = min_y; y <= max_y && attempts < max_attempts; y += step) {
                 attempts++;
                 Point pos = {x, y};
 
                 if (piece_fits_in_board(piece, pos, board)) {
-                    // Score favorecendo fortemente esquerda e embaixo
-                    double score = x * 0.3 + y * 0.7;
+                    double score = x * 0.15 + y * 0.5;
 
-                    if (x < board->width * 0.3) {
-                        score *= 0.5;
+                    if (x < board->width * 0.25) {
+                        score *= 0.3;
+                    } else if (x < board->width * 0.5) {
+                        score *= 0.6;
+                    }
+
+                    if (score < best_score) {
+                        best_score = score;
+                        best_pos = pos;
+                    }
+                }
+            }
+        }
+    }
+
+    // FASE 4: VARREDURA FINAL ULTRA-FINA NO LADO ESQUERDO (se ainda não encontrou posição ótima)
+    // Se o melhor score encontrado não é excelente, fazer varredura extra no lado esquerdo
+    if (best_pos.x > board->width * 0.3) {
+        double max_x = min_double(board->width * 0.4, board->width - piece->width - input_data.distance_between_boards);
+        double max_y = board->height - piece->height - input_data.distance_between_boards;
+
+        // Grid super-fino só no lado esquerdo
+        double fine_step = 2.0;
+        int fine_attempts = 0;
+        const int max_fine_attempts = 3000;
+
+        for (double x = min_x; x <= max_x && fine_attempts < max_fine_attempts; x += fine_step) {
+            for (double y = min_y; y <= max_y && fine_attempts < max_fine_attempts; y += fine_step) {
+                fine_attempts++;
+                Point pos = {x, y};
+
+                if (piece_fits_in_board(piece, pos, board)) {
+                    double score = x * 0.15 + y * 0.5;
+
+                    if (x < board->width * 0.25) {
+                        score *= 0.3;
                     }
 
                     if (score < best_score) {
